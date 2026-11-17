@@ -1,9 +1,9 @@
 // 酷狗概念版自动签到 —— Cloudflare Workers 入口
 // 基于 develop202/kgcheckin 移植：Express 服务 → 直连 fetch；Actions cron → Cron Trigger
 import { runCheckin, beijingDate } from './checkin.js';
-import { getUsers, upsertUser, getState, saveState } from './store.js';
+import { getUsers, upsertUser, removeUser, getState, saveState } from './store.js';
 import { statusPage, loginPage } from './pages.js';
-import { qrKey, qrCheck } from './kugou/endpoints.js';
+import { qrKey, qrCheck, userDetail } from './kugou/endpoints.js';
 import { cryptoMd5, cryptoAesEncrypt, cryptoAesDecrypt, cryptoRSAEncrypt } from './kugou/crypto.js';
 
 const QR_TTL = 120; // 二维码有效期（秒）
@@ -39,6 +39,10 @@ export default {
           return handleManualCheckin(request, env);
         case '/api/state':
           return json({ state: await getState(env.KG_KV) });
+        case '/api/accounts':
+          if (request.method === 'GET') return handleAccountsList(env);
+          if (request.method === 'DELETE') return handleAccountDelete(request, env);
+          return json({ ok: false, error: 'method not allowed' }, 405);
         case '/probe':
           return json(runProbe());
         default:
@@ -85,8 +89,8 @@ async function runScheduled(env) {
 
 async function renderStatus(env) {
   const state = await getState(env.KG_KV);
-  const users = await getUsers(env.KG_KV);
-  return statusPage(state, users.length);
+  const accounts = await buildAccounts(env);
+  return statusPage(state, accounts);
 }
 
 /* ─────────────── 扫码登录 ─────────────── */
@@ -125,9 +129,17 @@ async function handleQrStatus(request, env) {
       const userid = res.body?.data?.userid;
       const token = res.body?.data?.token;
       if (userid && token) {
-        await upsertUser(env.KG_KV, { userid, token });
+        // 顺带取昵称（仅登录时 1 次请求，不占 cron 预算）；失败不影响登录
+        let nickname = '';
+        try {
+          const detail = await userDetail({ userid, token });
+          nickname = detail?.body?.data?.nickname || '';
+        } catch {
+          /* 忽略 */
+        }
+        await upsertUser(env.KG_KV, { userid, token, nickname });
         await env.KG_KV.delete(`qr:${key}`); // 一次性
-        return json({ status: 4 });
+        return json({ status: 4, nickname });
       }
       return json({ status: -1, error: '登录成功但缺少 token' });
     }
@@ -141,6 +153,89 @@ async function handleQrStatus(request, env) {
 async function renderQrSvg(text) {
   const { toSvg } = await import('./qr-render.js');
   return toSvg(text);
+}
+
+/* ─────────────── 账号管理 ─────────────── */
+
+/**
+ * 账号的不透明标识：md5(userid) 前 8 位。
+ * 页面只拿到它，真实 userid 与 token 永不出现在前端。
+ */
+function opaqueId(userid) {
+  return cryptoMd5(`kg:${userid}`).slice(0, 8);
+}
+
+/** 账号列表（脱敏，绝不返回 token） */
+async function buildAccounts(env) {
+  const users = await getUsers(env.KG_KV);
+  const state = await getState(env.KG_KV);
+
+  // 从最近一次签到结果里补 VIP 到期时间，方便一眼看到各号状态
+  const byNickname = new Map();
+  for (const r of state?.results || []) {
+    if (r.nickname) byNickname.set(r.nickname, r);
+  }
+
+  return users.map((u) => {
+    const maskedNickname = u.nickname ? maskDisplayName(u.nickname) : '';
+    const r = maskedNickname ? byNickname.get(maskedNickname) : null;
+    return {
+      id: opaqueId(u.userid),
+      nickname: maskedNickname || maskIdentifier(u.userid),
+      addedAt: u.addedAt || null,
+      vipExpiry: r?.vipExpiry || '',
+      lastStatus: r?.status || '',
+    };
+  });
+}
+
+/** 账号列表 API */
+async function handleAccountsList(env) {
+  const accounts = await buildAccounts(env);
+  return json({ ok: true, count: accounts.length, accounts });
+}
+
+/** 删除账号 */
+async function handleAccountDelete(request, env) {
+  let body = {};
+  try {
+    body = await request.json();
+  } catch {
+    return json({ ok: false, error: '请求体必须是 JSON' }, 400);
+  }
+
+  const id = String(body.id || '').trim();
+  if (!id) return json({ ok: false, error: '缺少 id' }, 400);
+
+  const users = await getUsers(env.KG_KV);
+  // 用同样的哈希比对，前端无法反推真实 userid
+  const target = users.find((u) => opaqueId(u.userid) === id);
+  if (!target) return json({ ok: false, error: '账号不存在（可能已删除）' }, 404);
+
+  await removeUser(env.KG_KV, target.userid);
+
+  // 全删光时一并清掉历史状态，避免状态页残留已删账号的信息
+  const remaining = (await getUsers(env.KG_KV)).length;
+  if (remaining === 0) await env.KG_KV.delete('state');
+
+  console.log(`account deleted: ${maskIdentifier(target.userid)}, remaining=${remaining}`);
+  return json({ ok: true, remaining });
+}
+
+function maskDisplayName(name) {
+  const s = String(name ?? '');
+  if (s.length === 0) return '';
+  if (s.length === 1) return `${s[0]}********`;
+  if (s.length === 2) return `${s[0]}********${s[1]}`;
+  return `${s.slice(0, 3)}***${s.slice(-2)}`;
+}
+
+function maskIdentifier(value) {
+  const s = String(value ?? '');
+  if (s.length === 0) return '';
+  if (s.length <= 2) return '*'.repeat(s.length);
+  if (s.length <= 6) return `${s[0]}***${s[s.length - 1]}`;
+  return `${s.slice(0, 3)}***${s.slice(-2)}`;
 }
 
 /* ─────────────── 手动签到（流式输出） ─────────────── */

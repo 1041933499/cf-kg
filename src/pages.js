@@ -1,5 +1,6 @@
 // HTML 页面 —— 状态页 + 扫码登录页
-export function statusPage(state, accountCount) {
+export function statusPage(state, accounts) {
+  const accountCount = accounts.length;
   const rows = (state?.results || [])
     .map((r) => {
       const statusColor =
@@ -40,6 +41,10 @@ button:hover{background:#2ea043}
 button:disabled{background:#21262d;color:#484f58;cursor:not-allowed}
 button.secondary{background:#21262d;color:#c9d1d9}
 button.secondary:hover{background:#30363d}
+button.danger{background:#21262d;color:#f85149;border:1px solid #f8514933;padding:5px 14px;font-size:13px}
+button.danger:hover{background:#f85149;color:#fff;border-color:#f85149}
+button.danger:disabled{background:#21262d;color:#484f58;border-color:#30363d;cursor:not-allowed}
+tr.removing{opacity:.4}
 input{background:#0d1117;border:1px solid #30363d;border-radius:8px;padding:9px 12px;color:#e6edf3;font-size:14px;width:220px}
 input:focus{outline:none;border-color:#58a6ff}
 .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
@@ -75,6 +80,31 @@ input:focus{outline:none;border-color:#58a6ff}
   </div>
 
   <div class="card">
+    <h2>账号管理 <span style="color:#8b949e;font-weight:400;font-size:13px">共 ${accountCount} 个</span></h2>
+    ${
+      accountCount === 0
+        ? `<p style="color:#8b949e;font-size:13px">暂无账号，<a href="/login" style="color:#58a6ff">扫码登录</a>添加。</p>`
+        : `<table id="acctTable">
+             <tr><th>昵称</th><th>VIP到期</th><th>上次状态</th><th>添加时间</th><th style="text-align:right">操作</th></tr>
+             ${accounts
+               .map(
+                 (a) => `<tr data-id="${escapeHtml(a.id)}">
+                   <td>${escapeHtml(a.nickname)}</td>
+                   <td>${escapeHtml(a.vipExpiry || '—')}</td>
+                   <td>${escapeHtml(a.lastStatus || '—')}</td>
+                   <td>${a.addedAt ? escapeHtml(formatTime(a.addedAt)) : '—'}</td>
+                   <td style="text-align:right">
+                     <button class="danger" data-del="${escapeHtml(a.id)}" data-name="${escapeHtml(a.nickname)}">删除</button>
+                   </td>
+                 </tr>`
+               )
+               .join('')}
+           </table>
+           <p style="color:#484f58;font-size:12px;margin-top:10px">删除后需重新扫码登录才能继续签到；token 会立即从存储中移除。</p>`
+    }
+  </div>
+
+  <div class="card">
     <h2>操作</h2>
     <div class="row" style="margin-bottom:12px">
       <button id="runBtn" ${noAccounts ? 'disabled' : ''}>立即签到</button>
@@ -94,6 +124,42 @@ function appendLog(text) {
   logEl.scrollTop = logEl.scrollHeight;
 }
 document.getElementById('refreshBtn').onclick = () => location.reload();
+
+// 账号删除
+document.querySelectorAll('[data-del]').forEach(function(btn) {
+  btn.onclick = async function() {
+    const id = this.dataset.del;
+    const name = this.dataset.name || '该账号';
+    if (!confirm('确认删除账号「' + name + '」？\\n删除后 token 立即从存储移除，需重新扫码登录。')) return;
+    this.disabled = true;
+    this.textContent = '删除中...';
+    const tr = this.closest('tr');
+    try {
+      const resp = await fetch('/api/accounts', {
+        method: 'DELETE',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ id: id })
+      });
+      const data = await resp.json();
+      if (!data.ok) throw new Error(data.error || '删除失败');
+      tr.classList.add('removing');
+      const remaining = typeof data.remaining === 'number' ? data.remaining : null;
+      if (remaining === 0) {
+        location.reload();
+        return;
+      }
+      tr.remove();
+      const cnt = document.querySelector('#acctTable') ? document.querySelectorAll('#acctTable tr[data-id]').length : 0;
+      const head = document.querySelector('.card h2 span');
+      if (head && cnt) head.textContent = '共 ' + cnt + ' 个';
+      if (cnt === 0) location.reload();
+    } catch (e) {
+      this.disabled = false;
+      this.textContent = '删除';
+      alert('删除失败: ' + e.message);
+    }
+  };
+});
 document.getElementById('runBtn').onclick = async function() {
   this.disabled = true;
   logEl.style.display = 'block';
@@ -230,4 +296,15 @@ function escapeHtml(s) {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
+}
+
+function formatTime(ts) {
+  try {
+    const d = new Date(ts);
+    if (isNaN(d.getTime())) return '—';
+    const p = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+  } catch {
+    return '—';
+  }
 }

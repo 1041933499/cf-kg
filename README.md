@@ -63,6 +63,7 @@ npm run deploy
 2. 扫码成功后 token 自动存入 KV，返回状态页
 3. 点「立即签到」可手动触发，页面实时滚动日志
 4. 每天 01:10 自动执行，状态页展示各账号听歌领取 / 广告领取次数 / VIP 到期时间
+5. 状态页「账号管理」卡片可查看已添加账号（昵称脱敏）并删除；删除后 token 立即从 KV 移除
 
 ### 接口
 
@@ -74,6 +75,8 @@ npm run deploy
 | `/api/qr/status?key=` | GET | 轮询扫码状态（0 过期 / 1 未扫 / 2 待确认 / 4 成功） |
 | `/api/checkin` | POST | 手动签到，流式返回日志 |
 | `/api/state` | GET | 最近一次签到结果 JSON |
+| `/api/accounts` | GET | 账号列表（脱敏，不含 token） |
+| `/api/accounts` | DELETE | 删除账号，body `{"id": "<列表返回的 id>"}` |
 | `/probe` | GET | `node:crypto` 可用性探针（md5 / aes / rsa） |
 
 ## 项目结构
