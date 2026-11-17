@@ -11,10 +11,12 @@
   "triggers": {
     "crons": ["10 17 * * *"]
   },
+  // 首次部署前先创建 KV namespace 并把 id 填进来：
+  //   npx wrangler kv namespace create KG_KV
   "kv_namespaces": [
     {
       "binding": "KG_KV",
-      "id": "7156257152514caeb26b864f8c5b0940"
+      "id": "REPLACE_WITH_KV_NAMESPACE_ID"
     }
   ]
 }
