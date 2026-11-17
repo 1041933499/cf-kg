@@ -21,3 +21,9 @@ npm-debug.log*
 
 # 本地调试脚本
 verify*.js
+verify*.mjs
+verify*.cjs
+
+# wrangler --outdir 生成的辅助文件（只提交 standalone/index.js 本体）
+standalone/*.map
+standalone/README.md
