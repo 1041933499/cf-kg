@@ -1,0 +1,76 @@
+# ============================================================================
+# 扫码登录添加账号 —— fork 用户免本地环境的账号配置方式
+#
+# 一次性前置（仓库 Settings → Secrets and variables → Actions → New repository secret）：
+#   1. 创建 classic 令牌（只勾 repo 权限）：https://github.com/settings/tokens/new
+#   2. Secret Name = KGGNB_PAT，Value = ghp_xxxx
+#
+# 使用：Actions → 扫码登录添加账号 → Run workflow（可改备注）
+#   → 打开本次运行日志，用【酷狗概念版 APP】扫日志中的二维码（或打开链接扫码）
+#   → 脚本自动校验账号可用后，把账号串写入 Secret KGGNB（覆盖旧值）
+#
+# 安全说明：
+#   - 运行日志是公开的：账号串（token）绝不打印，只写入 Secret；日志仅显示
+#     userid/金币等脱敏信息
+#   - 二维码 2 分钟有效、单次有效；他人扫到只会把 TA 自己的账号写进来（无利可图，
+#     重新跑一次即可覆盖）
+#   - Secret 不可读回：本工作流只能【覆盖】单账号；多账号请在本地用
+#     scripts/kglogin.py 多次扫码后以 & 拼接，整体粘贴进 KGGNB
+#   - 令牌只用于 gh secret set（写入 KGGNB），建议只给 repo 权限
+# ============================================================================
+
+name: 扫码登录添加账号
+
+on:
+  workflow_dispatch:
+    inputs:
+      remark:
+        description: "账号备注（写入账号串首段）"
+        required: true
+        default: "我的号"
+
+concurrency:
+  group: kglogin
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  login:
+    runs-on: ubuntu-latest
+    # 二维码 120s 有效 + 轮询 150s + 校验，8 分钟足够
+    timeout-minutes: 8
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: 检查 KGGNB_PAT（写入 Secret 所需令牌）
+        env:
+          KGGNB_PAT: ${{ secrets.KGGNB_PAT }}
+        run: |
+          if [ -z "$KGGNB_PAT" ]; then
+            echo "::error::未配置 KGGNB_PAT — 需要一个带 repo 权限的令牌才能把扫码结果写入 Secret。创建 https://github.com/settings/tokens/new （classic，只勾 repo），再存入仓库 Secret：名称 KGGNB_PAT"
+            exit 1
+          fi
+
+      - name: 生成二维码并等待扫码
+        env:
+          REMARK: ${{ inputs.remark }}
+        run: |
+          python3 -m pip install --quiet qrcode
+          python3 scripts/kglogin.py --seconds 150 --remark "$REMARK" --out kg_account.txt
+
+      - name: 校验账号（只读 info）
+        run: |
+          echo "校验账号可用性..."
+          KGGNB="$(cat kg_account.txt)" python3 scripts/kgcoin.py --target 1w --info
+
+      - name: 写入 Secret KGGNB
+        env:
+          GH_TOKEN: ${{ secrets.KGGNB_PAT }}
+        run: |
+          gh secret set KGGNB --body "$(cat kg_account.txt)"
+          echo "✅ 账号已保存到 Secret KGGNB（值不显示）"
+          echo "📅 定时任务：每天北京 00:05 自动跑（Actions → 每日金币任务）"
+          echo "👉 可去 Actions → 每日金币任务 → Run workflow → mode=info 再手动验证一次"

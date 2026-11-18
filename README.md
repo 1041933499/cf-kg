@@ -195,6 +195,33 @@ KGGNB_TARGET=1w            # 档位，可省略（默认 10w）
 - Actions 定时任务平台高负载时可能延迟几分钟，正常现象
 - 单 job 上限 6 小时：`1w`/`10w` 档（受 `loop1105_max_wait` 封顶）远在限制内；`25w` 满 35 轮挂机可能贴边，建议本地/青龙跑或手动选 `once` 模式
 
+### 扫码添加账号（Fork 用户推荐）
+
+不用抓包找 token——用**酷狗概念版 APP 扫码**即可拿到账号串（`备注#token#userid`）。两种方式：
+
+**方式 A：Actions 里扫码（无需本地环境）**
+
+1. 一次性配置能写 Secret 的令牌：
+   - 创建 classic 令牌（**只勾 `repo`**）：https://github.com/settings/tokens/new
+   - 仓库 **Settings → Secrets and variables → Actions → New repository secret**：Name = `KGGNB_PAT`，Value = 令牌
+2. **Actions → 扫码登录添加账号 → Run workflow**（可改账号备注）
+3. 打开本次运行日志，用【酷狗概念版 APP】扫日志里的二维码（或打开日志中的链接扫码）
+4. 脚本自动校验账号后写入 Secret `KGGNB`，完成 ✅（之后等定时或手动跑 `每日金币任务`）
+
+> 运行日志是公开的，所以账号串**只写入 Secret、绝不打印**；二维码 2 分钟有效、过期自动换码。
+
+**方式 B：本地扫码**
+
+```bash
+python scripts/kglogin.py                  # 终端出码（pip install qrcode 可直显）
+python scripts/kglogin.py --remark 小号     # 自定义备注
+```
+
+扫码成功后终端输出账号串，粘进 Secret `KGGNB` 即可。
+
+- **多账号**：方式 B 多次扫码，用 `&` 拼接后整体粘贴（Secret 不可读回，方式 A 只能覆盖单账号）
+- 扫码流程与网页登录同款（`login-user.kugou.com` 二维码接口），拿到的 token 即金币脚本可用的登录态
+
 ### 风控建议
 
 - 账号较新或已出现风控迹象 → 先用 `1w` 跑几天观察，再逐步升 `10w`
