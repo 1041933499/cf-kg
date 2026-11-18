@@ -2,9 +2,16 @@
 # -*- coding: utf-8 -*-
 """
 ================================================================================
- 酷狗概念版 (KugouYouth) —— 【任务脚本 v3.6】每日金币目标档位 + 多账号并发收割
+ 酷狗概念版 (KugouYouth) —— 【任务脚本 v3.7】平台参数修正 + 每日金币目标档位
  青龙面板 / Dumb-Panel 多账号聚合推送版
 ================================================================================
+
+  v3.7 平台参数修正（关键修复，否则扫码 token 报 11002 请先登录）：
+    原脚本用概念版 lite 参数（appid 3116 / clientver 11571 / web 盐 NVPh），
+    对扫码登录拿到的 token 一律返回 11002。实测对照 Cloudflare Worker 请求层后
+    改为默认平台参数：appid 1005 / clientver 20489 / android 盐 OIlwieks，
+    并移除 srcappid/clienttoken（服务端按固定参数集验签，多带必 20006）。
+    三个请求函数（api / youth_api / concepts_api）与 _request 设备头均已对齐。
 
   v3.6 每日金币目标档位（本项目新增：控制收益量 + 降低风控风险）：
     通过 --target 或环境变量 KGGNB_TARGET 选择「每个账号每日获取多少金币」，
@@ -238,6 +245,15 @@ DEFAULT_ACCOUNTS = [
 ]
 
 SALT = "NVPh5oo715z5DIWAeQlhMDsWXXQV4hwt"
+
+# v3.7 平台参数修正（实测 + 对照 Cloudflare Worker 请求层验证）：
+#   原 lite 参数(appid 3116/clientver 11571/web盐) 对扫码登录的 token 返回
+#   11002 请先登录；改为默认平台参数(appid 1005/clientver 20489/android盐)后
+#   /yutc/youth、/youth、/concepts 各只读端点全部 200。
+#   另：请求参数里不能带 srcappid（服务端按固定参数集验签，带了必 20006）。
+ANDROID_SALT = "OIlwieks28dk2k092lksi2UIkp"
+KG_APPID = "1005"
+KG_CLIENTVER = "20489"
 BASE = "https://gateway.kugou.com"
 UA = ("Mozilla/5.0 (Linux; Android 14; 2203121C Build/UKQ1.231003.002; wv) "
       "AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/118.0.0.0 "
@@ -464,6 +480,16 @@ def make_sign(params, raw_body=None):
     return hashlib.md5((SALT + joined + SALT).encode("utf-8")).hexdigest()
 
 
+def make_sign_android(params, raw_body=None):
+    """gateway 业务接口签名（android 盐 + 字典序 k=v 直连 + body + 盐），
+    与 Cloudflare Worker 的 signatureAndroidParams 一致。"""
+    keys = sorted(params.keys())
+    joined = "".join(f"{k}={params[k]}" for k in keys)
+    if raw_body:
+        joined += raw_body
+    return hashlib.md5((ANDROID_SALT + joined + ANDROID_SALT).encode("utf-8")).hexdigest()
+
+
 def make_ticket(taskid):
     raw = f"{ACC.get('userid', '')}{int(taskid)}{int(time.time())}{TICKET_SALT}"
     return hashlib.md5(raw.encode("utf-8")).hexdigest()
@@ -474,9 +500,22 @@ def _request(url, raw, method, _retry):
                                  method=method)
     req.add_header("User-Agent", UA)
     req.add_header("Content-Type", "application/json; charset=utf-8")
+    # v3.6.1: 携带登录态 Cookie（与 Worker 签到/青龙脚本对齐）——
+    # 仅 query 带 token 时部分 youth 接口会返回 11002 请先登录
+    if ACC.get("token"):
+        _ck = f"token={ACC['token']}; userid={ACC.get('userid', '')}"
+        if ACC.get("dfid"):
+            _ck += f"; dfid={ACC['dfid']}"
+        req.add_header("Cookie", _ck)
     if ACC.get("devid"):
         req.add_header("KG-DEVID", ACC["devid"])
     req.add_header("KG-CLIENTTIMEMS", str(int(time.time() * 1000)))
+    # v3.7: 与 Worker 请求层对齐的设备头
+    if ACC.get("dfid"):
+        req.add_header("dfid", ACC["dfid"])
+    if ACC.get("mid"):
+        req.add_header("mid", ACC["mid"])
+    req.add_header("clienttime", str(int(time.time())))
     req.add_header("Accept-Encoding", "gzip")
 
     last_err = None
@@ -507,13 +546,12 @@ def api(path, params=None, data=None, method="GET", _retry=None, prefix="/yutc")
     if _retry is None:
         _retry = CFG["retry"]
     p = {
-        "appid": "3116",
-        "clientver": "11571",
+        "appid": KG_APPID,
+        "clientver": KG_CLIENTVER,
         "clienttime": str(int(time.time())),
         "mid": ACC.get("mid", ""),
         "uuid": "-",
         "dfid": ACC.get("dfid", ""),
-        "srcappid": "2919",
         "userid": ACC.get("userid", ""),
         "token": ACC.get("token", ""),
     }
@@ -522,7 +560,7 @@ def api(path, params=None, data=None, method="GET", _retry=None, prefix="/yutc")
     raw = None
     if data is not None:
         raw = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
-    p["signature"] = make_sign(p, raw)
+    p["signature"] = make_sign_android(p, raw)
     url = BASE + prefix + path + "?" + urllib.parse.urlencode(p)
     return _request(url, raw, method, _retry)
 
@@ -531,14 +569,12 @@ def youth_api(path, params=None, data=None, method="GET", _retry=None):
     if _retry is None:
         _retry = CFG["retry"]
     p = {
-        "appid": YOUTH_APPID,
-        "clientver": YOUTH_CLIENTVER,
-        "clienttime": str(int(time.time() * 1000)),
+        "appid": KG_APPID,
+        "clientver": KG_CLIENTVER,
+        "clienttime": str(int(time.time())),
         "mid": ACC.get("mid", "") or "-",
         "uuid": "-",
         "dfid": ACC.get("dfid", "") or "-",
-        "srcappid": "2919",
-        "clienttoken": ACC.get("token", ""),
         "userid": ACC.get("userid", ""),
         "token": ACC.get("token", ""),
     }
@@ -547,7 +583,7 @@ def youth_api(path, params=None, data=None, method="GET", _retry=None):
     raw = None
     if data is not None:
         raw = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
-    p["signature"] = make_sign(p, raw)
+    p["signature"] = make_sign_android(p, raw)
     url = BASE + "/youth" + path + "?" + urllib.parse.urlencode(p)
     return _request(url, raw, method, _retry)
 
@@ -556,13 +592,12 @@ def concepts_api(path, params=None, data=None, method="GET", _retry=None):
     if _retry is None:
         _retry = CFG["retry"]
     p = {
-        "appid": YOUTH_APPID,
-        "clientver": YOUTH_CLIENTVER,
-        "clienttime": str(int(time.time() * 1000)),
+        "appid": KG_APPID,
+        "clientver": KG_CLIENTVER,
+        "clienttime": str(int(time.time())),
         "mid": ACC.get("mid", "") or "-",
         "uuid": "-",
         "dfid": ACC.get("dfid", "") or "-",
-        "srcappid": "2919",
         "userid": ACC.get("userid", ""),
         "token": ACC.get("token", ""),
     }
@@ -571,7 +606,7 @@ def concepts_api(path, params=None, data=None, method="GET", _retry=None):
     raw = None
     if data is not None:
         raw = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
-    p["signature"] = make_sign(p, raw)
+    p["signature"] = make_sign_android(p, raw)
     url = BASE + "/concepts" + path + "?" + urllib.parse.urlencode(p)
     return _request(url, raw, method, _retry)
 
@@ -1344,7 +1379,7 @@ def main():
                 bind_code = args[i + 1]
 
     log("=" * 62)
-    log(" 酷狗概念版 · 任务脚本 v3.6 (每日目标档位 · 多账号收割 · 满链翻倍)")
+    log(" 酷狗概念版 · 任务脚本 v3.7 (平台参数修正 · 每日目标档位 · 多账号收割)")
     log("=" * 62)
     if _warn_target:
         log(f"⚠️ 无法识别的目标值 {raw_target!r}，已回退默认 {DEFAULT_TARGET}")
