@@ -177,6 +177,24 @@ KGGNB_TARGET=1w            # 档位，可省略（默认 10w）
 
 支持 `--serial` / `--parallel` 强制串并行（优先于档位默认）。
 
+### GitHub Actions 自动跑（已内置 `.github/workflows/coin.yml`）
+
+不想开电脑时可交给 GitHub 定时执行：每天 **UTC 16:05（北京 00:05，金币 00:00 重置后）** 自动运行；也可在 **Actions → 每日金币任务 → Run workflow** 手动触发，下拉框选档位（1w / 10w / 25w）。
+
+首次使用前在仓库 **Settings → Secrets and variables → Actions** 配置：
+
+| 类型 | 名称 | 值 |
+|---|---|---|
+| Secret（**必填**） | `KGGNB` | 账号串，多账号用 `&` 或换行分隔 |
+| Variable（可选） | `KGGNB_TARGET` | 定时跑的默认档位，不填按 `1w` |
+
+注意：
+
+- 未配置 `KGGNB` 时任务会**失败报错**（故意的，避免静默漏跑）
+- fork 后需到 Settings → Actions → General 手动 **Enable actions**；fork 仓库 60 天无提交会自动暂停定时
+- Actions 定时任务平台高负载时可能延迟几分钟，正常现象
+- 单 job 上限 6 小时：`1w`/`10w` 档（受 `loop1105_max_wait` 封顶）远在限制内；`25w` 满 35 轮挂机可能贴边，建议本地/青龙跑或手动选 `once` 模式
+
 ### 风控建议
 
 - 账号较新或已出现风控迹象 → 先用 `1w` 跑几天观察，再逐步升 `10w`

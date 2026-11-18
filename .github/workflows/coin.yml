@@ -1,0 +1,91 @@
+# ============================================================================
+# 每日金币任务（scripts/kgcoin.py 的 GitHub Actions 版）
+#
+# 触发方式：
+#   1. 定时：每天 UTC 16:05 = 北京时间 00:05（金币日常 00:00 重置后立即跑）
+#   2. 手动：Actions → 每日金币任务 → Run workflow，下拉选档位
+#
+# 首次使用前必须配置（仓库 Settings → Secrets and variables → Actions）：
+#   Secrets（必填）  ：KGGNB       账号，格式见脚本头部注释，多账号用 & 或换行分隔
+#   Variables（可选）：KGGNB_TARGET 默认档位 1w / 10w / 25w / 任意金币数字（默认 1w）
+#
+# 说明：
+#   - 档位含义见 README「金币任务脚本」：1w 保守 / 10w 中等 / 25w 激进(原版)
+#   - 未配置 KGGNB 时任务会失败（exit 1）以便及时发现配置问题
+#   - GitHub 定时任务在高负载时可能延迟几分钟到十几分钟，属正常现象
+#   - fork 本仓库后需在 Settings → Actions → General 里 Enable actions
+#   - fork 仓库 60 天无提交会自动暂停定时任务
+# ============================================================================
+
+name: 每日金币任务
+
+on:
+  schedule:
+    - cron: "5 16 * * *" # UTC 16:05 = 北京 00:05
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "每日金币目标档位（每账号）"
+        type: choice
+        required: true
+        default: 1w
+        options:
+          - 1w
+          - 10w
+          - 25w
+      mode:
+        description: "运行模式（full=完整含1105挂机 / once=只跑一轮任务 / info=仅查看状态）"
+        type: choice
+        required: true
+        default: full
+        options:
+          - full
+          - once
+          - info
+
+# 防止上一次未跑完又被触发（排队而非并行）
+concurrency:
+  group: kgcoin-daily
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  coin:
+    runs-on: ubuntu-latest
+    # Actions 单 job 上限 6 小时；档位的 loop1105_max_wait 参数保证 1w/10w 档远在限制内
+    timeout-minutes: 340
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: 检查账号配置
+        env:
+          KGGNB: ${{ secrets.KGGNB }}
+        run: |
+          if [ -z "$KGGNB" ]; then
+            echo "::error::未配置 KGGNB Secret — 仓库 Settings → Secrets and variables → Actions → New repository secret（名称 KGGNB，值为账号串）"
+            exit 1
+          fi
+          echo "KGGNB 已配置（$(echo "$KGGNB" | grep -c '[&#]' || true) 段标记）"
+
+      - name: 运行金币任务
+        env:
+          KGGNB: ${{ secrets.KGGNB }}
+          # 手动触发选的档位 优先；否则用仓库变量 KGGNB_TARGET；都没有则 1w（保守默认）
+          KGGNB_TARGET: ${{ github.event.inputs.target || vars.KGGNB_TARGET || '1w' }}
+        run: |
+          MODE="${{ github.event.inputs.mode || 'full' }}"
+          echo "档位: $KGGNB_TARGET   模式: $MODE"
+          ARGS=(--target "$KGGNB_TARGET")
+          case "$MODE" in
+            once) ARGS+=(--once) ;;
+            info) ARGS+=(--info) ;;
+          esac
+          python scripts/kgcoin.py "${ARGS[@]}"
