@@ -31,3 +31,8 @@ verify*.cjs
 # wrangler --outdir ç”Ÿæˆçš„è¾…åŠ©æ–‡ä»¶ï¼ˆåªæäº¤ standalone/index.js æœ¬ä½“ï¼‰
 standalone/*.map
 standalone/README.md
+
+# É¨ÂëµÇÂ¼ÁÙÊ±²úÎï (scripts/kglogin.py)
+scripts/kg_login_qr.png
+qr_session.json
+kg_account.txt

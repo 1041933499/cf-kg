@@ -205,7 +205,8 @@ KGGNB_TARGET=1w            # 档位，可省略（默认 10w）
    - 创建 classic 令牌（**只勾 `repo`**）：https://github.com/settings/tokens/new
    - 仓库 **Settings → Secrets and variables → Actions → New repository secret**：Name = `KGGNB_PAT`，Value = 令牌
 2. **Actions → 扫码登录添加账号 → Run workflow**（可改账号备注）
-3. 打开本次运行日志，用【酷狗概念版 APP】扫日志里的二维码（或打开日志中的链接扫码）
+3. 打开本次运行日志，用【酷狗概念版 APP】扫「生成二维码」步骤里的二维码
+   - 扫不出来：运行页底部 **Artifacts → login-qr.zip → 解压打开 `qr.png`** 再扫（更清晰）
 4. 脚本自动校验账号后写入 Secret `KGGNB`，完成 ✅（之后等定时或手动跑 `每日金币任务`）
 
 > 运行日志是公开的，所以账号串**只写入 Secret、绝不打印**；二维码 2 分钟有效、过期自动换码。
