@@ -166,22 +166,21 @@ def save_png(sess):
 
 
 def show_qr(sess):
-    """展示二维码：终端全块字符 + PNG 图片（两种都出，哪个能用用哪个）"""
+    """展示二维码：本地出字符码 + PNG；GitHub Actions 走 PNG 图片直链"""
     payload = f"{QR_H5}?qrcode={sess['key']}"
     rendered = False
-    try:
-        print_ascii_qr(payload)
-        log("↑ 请用【酷狗概念版 APP】扫描上方二维码")
-        rendered = True
-    except ImportError:
-        log("提示: 未安装 qrcode 库（pip install qrcode）")
-    except Exception as e:                 # noqa: BLE001
-        log(f"字符二维码渲染失败: {e}")
+    if not os.environ.get("GITHUB_ACTIONS"):
+        try:
+            print_ascii_qr(payload)
+            log("↑ 请用【酷狗概念版 APP】扫描上方二维码")
+            rendered = True
+        except ImportError:
+            log("提示: 未安装 qrcode 库（pip install qrcode）")
+        except Exception as e:             # noqa: BLE001
+            log(f"字符二维码渲染失败: {e}")
     png = save_png(sess)
     if png:
         log(f"二维码图片已保存: {png}")
-        if os.environ.get("GITHUB_ACTIONS"):
-            log("👆 扫不出来？运行页底部 Artifacts → 下载 login-qr → 打开 qr.png 再扫")
     if not rendered:
         log(f"扫码数据（可自行生成二维码）: {payload}")
     return payload

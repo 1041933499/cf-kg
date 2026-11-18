@@ -6,16 +6,19 @@
 #   2. Secret Name = KGGNB_PAT，Value = ghp_xxxx
 #
 # 使用：Actions → 扫码登录添加账号 → Run workflow（可改备注）
-#   → 「生成二维码」步骤日志里有全块字符二维码
-#   → 扫不出来时：运行页底部 Artifacts → 下载 login-qr.zip → 解压打开 qr.png 再扫
-#   → 用【酷狗概念版 APP】扫码确认 → 自动校验并写入 Secret KGGNB（覆盖旧值）
+#   → 打开本次运行页的 【Summary】标签：直接显示二维码 PNG 图片，用概念版 APP 扫
+#   → 日志「发布二维码图片」步骤里也有图片直链（点开就是 PNG，无压缩包）
+#   → 扫码确认后自动校验并写入 Secret KGGNB（覆盖旧值）
 #
-# 安全说明：
-#   - 运行日志是公开的：账号串（token）绝不打印，只写入 --out 文件并直接进 Secret
-#   - 二维码约 2 分钟有效、单次有效；他人扫到只会把 TA 自己的账号写进来，重新跑即可覆盖
+# 实现说明：
+#   - 二维码 PNG 被推到独立分支 qr-image（每次强制覆盖，不累积历史）
+#   - 直链用 commit SHA 定位，避免 CDN 缓存导致扫到上一轮的过期码
+#   - 运行日志/摘要公开：账号串（token）绝不打印，只经文件直接写入 Secret
+#   - 二维码约 2 分钟有效、单次有效；他人扫到只会把 TA 自己的账号写进来，重跑即可覆盖
 #   - Secret 不可读回：本工作流只能【覆盖】单账号；多账号请在本地用
 #     scripts/kglogin.py 多次扫码后以 & 拼接，整体粘贴进 KGGNB
 #   - KGGNB_PAT 只用于 gh secret set，建议只给 repo 权限
+#   - 私有仓库 fork 无法用 raw 图（需登录），请改用 Artifacts 下载 login-qr
 # ============================================================================
 
 name: 扫码登录添加账号
@@ -33,7 +36,8 @@ concurrency:
   cancel-in-progress: true
 
 permissions:
-  contents: read
+  contents: write      # 需要推送 qr-image 分支（二维码图片）
+  actions: read
 
 jobs:
   login:
@@ -57,7 +61,33 @@ jobs:
           python3 -m pip install --quiet qrcode
           python3 scripts/kglogin.py --create --session qr_session.json
 
-      - name: 上传二维码图片（扫不出字符码时用）
+      - name: 发布二维码图片（直链 + Summary 显示）
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p /tmp/qrimg && cp scripts/kg_login_qr.png /tmp/qrimg/qr.png
+          cd /tmp/qrimg
+          git init -q -b qr-image
+          git add qr.png
+          git -c user.name="github-actions" -c user.email="actions@users.noreply.github.com" \
+              commit -qm "qr $(date +%s)"
+          git push -q -f "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" qr-image
+          SHA=$(git rev-parse HEAD)
+          URL="https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/${SHA}/qr.png"
+          echo "$URL" > "$GITHUB_WORKSPACE/qr_url.txt"
+          echo "📱 二维码图片直链（复制到浏览器打开，点开就是 PNG）:"
+          echo "$URL"
+          {
+            echo "## 📱 扫码登录二维码（约 2 分钟有效）"
+            echo ""
+            echo "![二维码](${URL})"
+            echo ""
+            echo "用【酷狗概念版 APP】扫码；过期请重新 Run workflow。"
+            echo ""
+            echo "图片直链：[${URL}](${URL})"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 上传二维码图片（私有仓库兜底备选）
         uses: actions/upload-artifact@v4
         with:
           name: login-qr
@@ -69,7 +99,8 @@ jobs:
         env:
           REMARK: ${{ inputs.remark }}
         run: |
-          echo "⏳ 等待扫码中（约 2.5 分钟）… 扫不出来请下载 Artifacts → login-qr"
+          echo "⏳ 等待扫码中（约 2.5 分钟）…"
+          echo "📱 二维码图片: $(cat qr_url.txt)"
           python3 scripts/kglogin.py --poll --session qr_session.json \
             --seconds 150 --remark "$REMARK" --out kg_account.txt
 
