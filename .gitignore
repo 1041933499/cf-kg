@@ -1,6 +1,10 @@
 # 依赖
 node_modules/
 
+# Python（scripts/ 本地运行产物）
+__pycache__/
+*.pyc
+
 # Wrangler 本地状态 / 构建产物（含本地 KV 数据、缓存、账号信息）
 .wrangler/
 dist/
